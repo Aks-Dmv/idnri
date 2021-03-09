@@ -18,7 +18,7 @@ parser.add_argument('--num-test', type=int, default=100,
                     help='Number of test simulations to generate.')
 parser.add_argument('--length', type=int, default=5100,
                     help='Length of trajectory.')
-parser.add_argument('--length-test', type=int, default=1000,
+parser.add_argument('--length-test', type=int, default=5100,
                     help='Length of test set trajectory.')
 parser.add_argument('--sample-freq', type=int, default=100,
                     help='How often to sample the trajectory.')
