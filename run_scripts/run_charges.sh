@@ -6,7 +6,7 @@ GPU=3 # Set to whatever GPU you want to use
 DATA_PATH='data/charges/'
 mkdir -p $DATA_PATH
 # If for some reason you want to regenerate this data, uncomment this line
-python dnri/datasets/charged_simulation/generate_dataset..py
+python dnri/datasets/charged_simulation/generate_dataset.py
 
 BASE_RESULTS_DIR="results/charges/"
 
