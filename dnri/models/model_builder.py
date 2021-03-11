@@ -15,7 +15,7 @@ def build_model(params):
             model = dnri_dynamicvars.DNRI_DynamicVars(params)
         else:
             model = dnri.DNRI(params)
-        print("dNRI MODEL: ",model)
+        #print("dNRI MODEL: ",model)
     elif params['model_type'] == 'fc_baseline':
         dynamic_vars = params.get('dynamic_vars', False)
         if dynamic_vars:
