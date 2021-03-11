@@ -63,7 +63,7 @@ def train(model, train_data, val_data, params, train_writer, val_writer):
     end = start = 0 
     misc.seed(1)
     for epoch in range(start_epoch, num_epochs+1):
-        print("EPOCH", epoch, (end-start))
+        #print("EPOCH", epoch, (end-start))
         model.train()
         model.train_percent = epoch / num_epochs
         start = time.time() 
@@ -130,7 +130,7 @@ def train(model, train_data, val_data, params, train_writer, val_writer):
         if tuning_loss < best_val_result:
             best_val_epoch = epoch
             best_val_result = tuning_loss
-            print("BEST VAL RESULT. SAVING MODEL...")
+            #print("BEST VAL RESULT. SAVING MODEL...")
             model.save(best_path)
         model.save(checkpoint_dir)
         torch.save({
@@ -139,10 +139,10 @@ def train(model, train_data, val_data, params, train_writer, val_writer):
                     'best_val_result':best_val_result,
                     'best_val_epoch':best_val_epoch,
                    }, training_path)
-        print("EPOCH %d EVAL: "%epoch)
-        print("\tCURRENT VAL LOSS: %f"%tuning_loss)
-        print("\tBEST VAL LOSS:    %f"%best_val_result)
-        print("\tBEST VAL EPOCH:   %d"%best_val_epoch)
+        #print("EPOCH %d EVAL: "%epoch)
+        #print("\tCURRENT VAL LOSS: %f"%tuning_loss)
+        #print("\tBEST VAL LOSS:    %f"%best_val_result)
+        #print("\tBEST VAL EPOCH:   %d"%best_val_epoch)
         end = time.time()
 
     
