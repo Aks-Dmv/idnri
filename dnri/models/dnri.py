@@ -670,3 +670,134 @@ class DNRI_MLP_Decoder(nn.Module):
 
         # Predict position/velocity difference
         return inputs + pred, None
+
+class DNRI_Disc(nn.Module):
+    # Here, encoder also produces prior
+    def __init__(self, params):
+        super(DNRI_Disc, self).__init__()
+        num_vars = params['num_vars']
+        self.num_edges = params['num_edge_types']
+        self.sepaate_prior_encoder = params.get('separate_prior_encoder', False)
+        no_bn = False
+        dropout = params['encoder_dropout']
+        edges = np.ones(num_vars) - np.eye(num_vars)
+        self.send_edges = np.where(edges)[0]
+        self.recv_edges = np.where(edges)[1]
+        self.edge2node_mat = nn.Parameter(torch.FloatTensor(encode_onehot(self.recv_edges).transpose()), requires_grad=False)
+        self.save_eval_memory = params.get('encoder_save_eval_memory', False)
+
+
+        hidden_size = params['encoder_hidden']
+        
+        # The input size is double the dimension of x, as we
+        # are taking [ x_t, x_t+1 ] pairs
+        inp_size = 2*params['input_size']
+        self.mlp1 = RefNRIMLP(inp_size, hidden_size, hidden_size, dropout, no_bn=no_bn)
+        self.mlp2 = RefNRIMLP(hidden_size * 2, hidden_size, hidden_size, dropout, no_bn=no_bn)
+        self.mlp3 = RefNRIMLP(hidden_size, hidden_size, hidden_size, dropout, no_bn=no_bn)
+        self.mlp4 = RefNRIMLP(hidden_size * 3, hidden_size, hidden_size, dropout, no_bn=no_bn)
+
+        num_layers = params['prior_num_layers']
+        if num_layers == 1:
+            self.prior_fc_out = nn.Linear(hidden_size, self.num_edges)
+        else:
+            tmp_hidden_size = params['prior_hidden_size']
+            layers = [nn.Linear(hidden_size, tmp_hidden_size), nn.ELU(inplace=True)]
+            for _ in range(num_layers - 2):
+                layers.append(nn.Linear(tmp_hidden_size, tmp_hidden_size))
+                layers.append(nn.ELU(inplace=True))
+            layers.append(nn.Linear(tmp_hidden_size, self.num_edges))
+            self.prior_fc_out = nn.Sequential(*layers)
+
+
+        self.num_vars = num_vars
+        edges = np.ones(num_vars) - np.eye(num_vars)
+        self.send_edges = np.where(edges)[0]
+        self.recv_edges = np.where(edges)[1]
+
+        self.init_weights()
+
+    def init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_normal_(m.weight.data)
+                m.bias.data.fill_(0.1)
+
+    def node2edge(self, node_embeddings):
+        # Input size: [batch, num_vars, num_timesteps, embed_size]
+        if len(node_embeddings.shape) == 4:
+            send_embed = node_embeddings[:, self.send_edges, :, :]
+            recv_embed = node_embeddings[:, self.recv_edges, :, :]
+        else:
+            send_embed = node_embeddings[:, self.send_edges, :]
+            recv_embed = node_embeddings[:, self.recv_edges, :]
+        return torch.cat([send_embed, recv_embed], dim=-1)
+
+    def edge2node(self, edge_embeddings):
+        if len(edge_embeddings.shape) == 4:
+            old_shape = edge_embeddings.shape
+            tmp_embeddings = edge_embeddings.view(old_shape[0], old_shape[1], -1)
+            incoming = torch.matmul(self.edge2node_mat, tmp_embeddings).view(old_shape[0], -1, old_shape[2], old_shape[3])
+        else:
+            incoming = torch.matmul(self.edge2node_mat, edge_embeddings)
+        return incoming/(self.num_vars-1) #TODO: do we want this average?
+
+
+    def copy_states(self, prior_state):
+        if isinstance(prior_state, tuple) or isinstance(prior_state, list):
+            current_prior_state = (prior_state[0].clone(), prior_state[1].clone())
+        else:
+            current_prior_state = prior_state.clone()
+        return current_prior_state
+
+    def merge_hidden(self, hidden):
+        if isinstance(hidden[0], tuple) or isinstance(hidden[0], list):
+            result0 = torch.cat([x[0] for x in hidden], dim=0)
+            result1 = torch.cat([x[1] for x in hidden], dim=0)
+            result = (result0, result1)
+        else:
+            result = torch.cat(hidden, dim=0)
+        return result
+
+
+
+    def forward(self, inputs):
+        if self.training or not self.save_eval_memory:
+            # Inputs is shape [batch, num_timesteps, num_vars, input_size]
+            num_timesteps = inputs.size(1)
+            x = inputs.transpose(2, 1).contiguous()
+            # New shape: [num_sims, num_atoms, num_timesteps, num_dims]
+            x = self.mlp1(x)  # 2-layer ELU net per node
+            x = self.node2edge(x)
+            x = self.mlp2(x)
+            x_skip = x
+            x = self.edge2node(x)
+            x = self.mlp3(x)
+            x = self.node2edge(x)
+            x = torch.cat((x, x_skip), dim=-1)  # Skip connection
+            x = self.mlp4(x)
+        
+            
+            # At this point, x should be [batch, num_vars, num_timesteps, hidden_size]
+            old_shape = x.shape
+            
+            #x: [batch*num_vars, num_timesteps, hidden_size]
+            prior_result = self.prior_fc_out(x).view(old_shape[0], old_shape[1], old_shape[2], self.num_edges).transpose(1,2).contiguous()
+            return prior_result
+
+    def single_step_forward(self, inputs, prior_state):
+        # Inputs is shape [batch, num_vars, input_size]
+        x = self.mlp1(inputs)  # 2-layer ELU net per node
+        x = self.node2edge(x)
+        x = self.mlp2(x)
+        x_skip = x
+        x = self.edge2node(x)
+        x = self.mlp3(x)
+        x = self.node2edge(x)
+        x = torch.cat((x, x_skip), dim=-1)  # Skip connection
+        x = self.mlp4(x)
+
+        old_shape = x.shape
+
+        prior_result = self.prior_fc_out(x).view(old_shape[0], old_shape[1], self.num_edges)
+        return prior_result
