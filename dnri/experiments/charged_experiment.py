@@ -58,6 +58,9 @@ def eval_edges(model, dataset, params):
                 gt_edges = gt_edges[:, :-1]
             edge_count += edges.numel()
             full_edge_count += gt_edges.numel()
+            if batch_ind == 0:
+                for i in range(edges.shape[1]):
+                    print("edge/gt", edges[1,i,:].cpu().numpy(), gt_edges[1,i,:].cpu().numpy(), edges[2,i,:].cpu().numpy(), gt_edges[2,i,:].cpu().numpy())
             correct_edges += ((edges == gt_edges)).sum().item()
             edge_0_count += (gt_edges == 0).sum().item()
             edge_1_count += (gt_edges == 1).sum().item()
