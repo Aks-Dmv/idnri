@@ -624,7 +624,8 @@ class DNRI_MLP_Decoder(nn.Module):
         out_size = n_in_node
         self.out_fc1 = nn.Linear(in_size + msg_out, n_hid)
         self.out_fc2 = nn.Linear(n_hid, n_hid)
-        self.out_fc3 = nn.Linear(n_hid, out_size)
+        self.mu_layer = nn.Linear(n_hid, out_size)
+        self.log_std_layer = nn.Linear(n_hid, out_size)
 
         print('Using learned interaction net decoder.')
 
@@ -663,8 +664,10 @@ class DNRI_MLP_Decoder(nn.Module):
             start_idx = 0
         if self.training:
             p = self.dropout_prob
+            std_gating = 1.
         else:
             p = 0
+            std_gating = 0.
 
         # Run separate MLP for every edge type
         # NOTE: To exlude one edge type, simply offset range by 1
@@ -685,7 +688,13 @@ class DNRI_MLP_Decoder(nn.Module):
         # Output MLP
         pred = F.dropout(F.relu(self.out_fc1(aug_inputs)), p=p)
         pred = F.dropout(F.relu(self.out_fc2(pred)), p=p)
-        pred = self.out_fc3(pred)
+        
+        mu = self.mu_layer(pred)
+        log_std = self.log_std_layer(pred)
+        log_std = torch.clamp(log_std, -10, 1)
+        std = torch.exp(log_std)
+        
+        pred = mu + std_gating * torch.normal(torch.zeros(mu.shape), torch.ones(std.shape)) * std
 
         # Predict position/velocity difference
         return inputs + pred, None
