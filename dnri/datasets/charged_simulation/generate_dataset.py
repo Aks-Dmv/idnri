@@ -83,20 +83,20 @@ loc_test, vel_test, edges_test = generate_dataset(args.num_test,
 # [num_samples, num_timesteps, num_dims, num_atoms]
 num_atoms = loc_train.shape[3]
 
-loc_max = loc_train.max()
-loc_min = loc_train.min()
-vel_max = vel_train.max()
-vel_min = vel_train.min()
+# loc_max = loc_train.max()
+# loc_min = loc_train.min()
+# vel_max = vel_train.max()
+# vel_min = vel_train.min()
 
-# Normalize to [-1, 1]
-loc_train = (loc_train - loc_min) * 2 / (loc_max - loc_min) - 1
-vel_train = (vel_train - vel_min) * 2 / (vel_max - vel_min) - 1
+# # Normalize to [-1, 1]
+# loc_train = (loc_train - loc_min) * 2 / (loc_max - loc_min) - 1
+# vel_train = (vel_train - vel_min) * 2 / (vel_max - vel_min) - 1
 
-loc_valid = (loc_valid - loc_min) * 2 / (loc_max - loc_min) - 1
-vel_valid = (vel_valid - vel_min) * 2 / (vel_max - vel_min) - 1
+# loc_valid = (loc_valid - loc_min) * 2 / (loc_max - loc_min) - 1
+# vel_valid = (vel_valid - vel_min) * 2 / (vel_max - vel_min) - 1
 
-loc_test = (loc_test - loc_min) * 2 / (loc_max - loc_min) - 1
-vel_test = (vel_test - vel_min) * 2 / (vel_max - vel_min) - 1
+# loc_test = (loc_test - loc_min) * 2 / (loc_max - loc_min) - 1
+# vel_test = (vel_test - vel_min) * 2 / (vel_max - vel_min) - 1
 
 # Reshape to: [num_sims, num_atoms, num_timesteps, num_dims]
 loc_train = np.transpose(loc_train, [0, 3, 1, 2])
