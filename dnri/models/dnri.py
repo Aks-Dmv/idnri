@@ -694,7 +694,7 @@ class DNRI_MLP_Decoder(nn.Module):
         log_std = torch.clamp(log_std, -10, 1)
         std = torch.exp(log_std)
         
-        pred = mu + std_gating * torch.normal(torch.zeros(mu.shape), torch.ones(std.shape)) * std
+        pred = mu + std_gating * torch.normal(torch.zeros(mu.shape), torch.ones(std.shape)).cuda() * std
 
         # Predict position/velocity difference
         return inputs + pred, None
