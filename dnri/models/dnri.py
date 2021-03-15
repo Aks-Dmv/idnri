@@ -146,7 +146,7 @@ class DNRI(nn.Module):
             all_edges.append(edges)
         all_predictions = torch.stack(all_predictions, dim=1)
         # interventions
-        all_interventions = torch.stack(all_interventions, dim=1)
+        all_interventions = torch.stack(all_interventions, dim=-1)
         
         if disc is not None:
             x1_x2_pairs = torch.cat([all_predictions[:, :-1, :, :], all_predictions[:, 1:, :, :]], dim=-1)
