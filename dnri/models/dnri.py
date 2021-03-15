@@ -118,8 +118,8 @@ class DNRI(nn.Module):
             predictions, decoder_hidden, edges = self.single_step_forward(current_inputs, decoder_hidden, current_p_logits, hard_sample)
             
             # conducting an intervention
-            intervened_indices = torch.randint(current_p_logits.shape[1], (current_p_logits.shape[0],))
-            logit_to_flip = torch.randint(current_p_logits.shape[2], (current_p_logits.shape[0],))
+            intervened_indices = torch.randint(current_p_logits.shape[1], (current_p_logits.shape[0],)).cuda()
+            logit_to_flip = torch.randint(current_p_logits.shape[2], (current_p_logits.shape[0],)).cuda()
             intervened_p_logits = current_p_logits.clone()
             # This temp_storage will be used for the reparameterization trick
             temp_storage = current_p_logits.detach().clone()
