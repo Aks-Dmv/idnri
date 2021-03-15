@@ -85,7 +85,7 @@ class DNRI(nn.Module):
             hard=hard_sample2).view(old_shape2)
         mu2, sig2 = self.decoder.return_mu_sigma(inputs2, decoder_hidden2, edges2)
         
-        kld_loss = (0.5 * torch.sum(2*torch.log(sig2/sig1) + (sig1/sig2)**2 + ((mu1 - mu2)/sig2)**2 - 1, dim = -1) ).mean()
+        kld_loss = (0.5 * torch.sum(2*torch.log(sig2/sig1) + (sig1/sig2)**2 + ((mu1 - mu2)/sig2)**2 - 1, dim = -1) ).mean(dim = -1)
         
         return kld_loss
 
@@ -163,6 +163,7 @@ class DNRI(nn.Module):
         #    loss_nll[:,i] = loss_nll[:,i]*i**2
 
         loss_nll = loss_nll.mean(dim=-1)
+        all_interventions = all_interventions.mean(dim=-1)
         
         #intervention loss
         # intervention_loss_nll = self.nll(all_interventions, all_predictions).mean(dim=-1)
