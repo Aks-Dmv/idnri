@@ -76,6 +76,11 @@ class DNRI(nn.Module):
         all_edges = []
         all_predictions = []
         all_priors = []
+        
+        # intervention variables
+        all_interventions = []
+        interv_decoder_hidden = self.decoder.get_initial_hidden(inputs)
+        
         hard_sample = (not is_train) or self.train_hard_sample
         prior_logits, posterior_logits, _ = self.encoder(inputs[:, :-1])
         if not is_train:
@@ -92,9 +97,34 @@ class DNRI(nn.Module):
             else:
                 current_p_logits = prior_logits[:, step]
             predictions, decoder_hidden, edges = self.single_step_forward(current_inputs, decoder_hidden, current_p_logits, hard_sample)
+            
+            # conducting an intervention
+            intervened_indices = torch.randint(current_p_logits.shape[1], (current_p_logits.shape[0],))
+            logit_to_flip = torch.randint(current_p_logits.shape[2], (current_p_logits.shape[0],))
+            intervened_p_logits = current_p_logits.clone()
+            # This temp_storage will be used for the reparameterization trick
+            temp_storage = current_p_logits.detach().clone()
+            
+            for i in range(intervened_indices.shape[0]):
+                # if we want to flip [a,b], we need to add [b-a, a-b], i.e. [b-a, a-b] + [a,b] = [b,a]
+                max_ind = temp_storage[i, intervened_indices[i]].argmax()
+                
+                while (max_ind == logit_to_flip[i]).item():
+                    # pick another logit to flip
+                    logit_to_flip[i] = np.random.randint(temp_storage.shape[2])
+                        
+                sum_to_flip = temp_storage[i, intervened_indices[i], max_ind] - temp_storage[i, intervened_indices[i], logit_to_flip[i]]
+                intervened_p_logits[i, intervened_indices[i], logit_to_flip[i]] += sum_to_flip
+                intervened_p_logits[i, intervened_indices[i], max_ind] -= sum_to_flip
+            
+            interv_predictions, interv_decoder_hidden, _ = self.single_step_forward(current_inputs, interv_decoder_hidden, intervened_p_logits, hard_sample)
+            all_interventions.append(interv_predictions)
+            
             all_predictions.append(predictions)
             all_edges.append(edges)
         all_predictions = torch.stack(all_predictions, dim=1)
+        # interventions
+        all_interventions = torch.stack(all_interventions, dim=1)
         
         if disc is not None:
             x1_x2_pairs = torch.cat([all_predictions[:, :-1, :, :], all_predictions[:, 1:, :, :]], dim=-1)
@@ -112,11 +142,17 @@ class DNRI(nn.Module):
 
         loss_nll = loss_nll.mean(dim=-1)
         
+        #intervention loss
+        intervention_loss_nll = self.nll(all_interventions, all_predictions).mean(dim=-1)
+        
         prob = F.softmax(posterior_logits, dim=-1)
         loss_kl = self.kl_categorical_learned(prob, prior_logits)
         if self.add_uniform_prior:
             loss_kl = 0.5*loss_kl + 0.5*self.kl_categorical_avg(prob)
-        loss = loss_nll + self.kl_coef*loss_kl
+        
+        # intervention cap bounds the contrastive loss
+        intervention_cap = 0.05
+        loss = loss_nll + self.kl_coef*loss_kl - torch.max(intervention_loss_nll, torch.ones(intervention_loss_nll.shape).cuda()*intervention_cap)
         
         if disc is not None:
             loss = loss.mean() - self.kl_coef*disc_entropy.mean()
