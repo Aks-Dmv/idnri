@@ -69,6 +69,25 @@ class DNRI(nn.Module):
             hard=hard_sample).view(old_shape)
         predictions, decoder_hidden = self.decoder(inputs, decoder_hidden, edges)
         return predictions, decoder_hidden, edges
+    
+    def calc_contrastive_loss(self, inputs1, decoder_hidden1, edge_logits1, hard_sample1, inputs2, decoder_hidden2, edge_logits2, hard_sample2):
+        old_shape1 = edge_logits1.shape
+        edges1 = model_utils.gumbel_softmax(
+            edge_logits1.reshape(-1, self.num_edge_types), 
+            tau=self.gumbel_temp, 
+            hard=hard_sample1).view(old_shape1)
+        mu1, sig1 = self.decoder.return_mu_sigma(inputs1, decoder_hidden1, edges1)
+        
+        old_shape2 = edge_logits2.shape
+        edges2 = model_utils.gumbel_softmax(
+            edge_logits2.reshape(-1, self.num_edge_types), 
+            tau=self.gumbel_temp, 
+            hard=hard_sample2).view(old_shape2)
+        mu2, sig2 = self.decoder.return_mu_sigma(inputs2, decoder_hidden2, edges2)
+        
+        kld_loss = (0.5 * torch.sum(2*torch.log(sig2/sig1) + (sig1/sig2)**2 + ((mu1 - mu2)/sig2)**2 - 1, dim = -1) ).mean()
+        
+        return kld_loss
 
     def calculate_loss(self, inputs, is_train=False, teacher_forcing=True, return_edges=False, return_logits=False, use_prior_logits=False, disc=None):
         decoder_hidden = self.decoder.get_initial_hidden(inputs)
@@ -117,8 +136,11 @@ class DNRI(nn.Module):
                 intervened_p_logits[i, intervened_indices[i], logit_to_flip[i]] += sum_to_flip
                 intervened_p_logits[i, intervened_indices[i], max_ind] -= sum_to_flip
             
-            interv_predictions, interv_decoder_hidden, _ = self.single_step_forward(current_inputs, interv_decoder_hidden, intervened_p_logits, hard_sample)
-            all_interventions.append(interv_predictions)
+            # interv_predictions, interv_decoder_hidden, _ = self.single_step_forward(current_inputs, interv_decoder_hidden, intervened_p_logits, hard_sample)
+            # all_interventions.append(interv_predictions)
+            kld_loss = self.calc_contrastive_loss(current_inputs, interv_decoder_hidden, intervened_p_logits, hard_sample,
+                                                  current_inputs, decoder_hidden, current_p_logits, hard_sample)
+            all_interventions.append(kld_loss)
             
             all_predictions.append(predictions)
             all_edges.append(edges)
@@ -143,7 +165,8 @@ class DNRI(nn.Module):
         loss_nll = loss_nll.mean(dim=-1)
         
         #intervention loss
-        intervention_loss_nll = self.nll(all_interventions, all_predictions).mean(dim=-1)
+        # intervention_loss_nll = self.nll(all_interventions, all_predictions).mean(dim=-1)
+        intervention_loss_nll = all_interventions
         
         prob = F.softmax(posterior_logits, dim=-1)
         loss_kl = self.kl_categorical_learned(prob, prior_logits)
@@ -151,8 +174,8 @@ class DNRI(nn.Module):
             loss_kl = 0.5*loss_kl + 0.5*self.kl_categorical_avg(prob)
         
         # intervention cap bounds the contrastive loss
-        intervention_cap = 0.05
-        loss = loss_nll + self.kl_coef*loss_kl - torch.max(intervention_loss_nll, torch.ones(intervention_loss_nll.shape).cuda()*intervention_cap)
+        intervention_cap = 10.
+        loss = loss_nll + self.kl_coef*loss_kl - torch.min(intervention_loss_nll, torch.ones(intervention_loss_nll.shape).cuda()*intervention_cap)
         
         if disc is not None:
             loss = loss.mean() - self.kl_coef*disc_entropy.mean()
@@ -674,6 +697,63 @@ class DNRI_MLP_Decoder(nn.Module):
 
     def get_initial_hidden(self, inputs):
         return None
+    
+    def return_mu_sigma(self, inputs, hidden, edges):
+
+        # single_timestep_inputs has shape
+        # [batch_size, num_atoms, num_dims]
+
+        # single_timestep_rel_type has shape:
+        # [batch_size, num_atoms*(num_atoms-1), num_edge_types]
+        # Node2edge
+        receivers = inputs[:, self.recv_edges, :]
+        senders = inputs[:, self.send_edges, :]
+        pre_msg = torch.cat([receivers, senders], dim=-1)
+
+        if inputs.is_cuda:
+            all_msgs = torch.cuda.FloatTensor(pre_msg.size(0), pre_msg.size(1),
+                                self.msg_out_shape).fill_(0.)
+        else:
+            all_msgs = torch.zeros(pre_msg.size(0), pre_msg.size(1),
+                                self.msg_out_shape)
+
+        if self.skip_first_edge_type:
+            start_idx = 1
+        else:
+            start_idx = 0
+        if self.training:
+            p = self.dropout_prob
+            std_gating = 1.
+        else:
+            p = 0
+            std_gating = 0.
+
+        # Run separate MLP for every edge type
+        # NOTE: To exlude one edge type, simply offset range by 1
+        for i in range(start_idx, len(self.msg_fc2)):
+            msg = F.relu(self.msg_fc1[i](pre_msg))
+            msg = F.dropout(msg, p=p)
+            msg = F.relu(self.msg_fc2[i](msg))
+            msg = msg * edges[:, :, i:i + 1]
+            all_msgs += msg
+
+        # Aggregate all msgs to receiver
+        agg_msgs = all_msgs.transpose(-2, -1).matmul(self.edge2node_mat).transpose(-2, -1)
+        agg_msgs = agg_msgs.contiguous()
+
+        # Skip connection
+        aug_inputs = torch.cat([inputs, agg_msgs], dim=-1)
+
+        # Output MLP
+        pred = F.dropout(F.relu(self.out_fc1(aug_inputs)), p=p)
+        pred = F.dropout(F.relu(self.out_fc2(pred)), p=p)
+        
+        mu = self.mu_layer(pred)
+        log_std = self.log_std_layer(pred)
+        log_std = torch.clamp(log_std, -10, 1)
+        std = torch.exp(log_std)
+
+        return mu, std
 
     def forward(self, inputs, hidden, edges):
 
