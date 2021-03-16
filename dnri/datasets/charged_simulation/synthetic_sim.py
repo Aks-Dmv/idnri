@@ -80,11 +80,11 @@ class ChargedParticlesSim(object):
         np.fill_diagonal(diag_mask, 0)
         counter = 0
         # Sample edges
-        n_switches = np.random.randint(low=5, high=9)
+        n_switches = np.random.randint(low=1, high=2)
         charges = np.random.choice(self._charge_types, size=(n_switches, self.n_balls),
                                    p=charge_prob)
         
-        duration_length = np.random.randint(low=7, high=14, size=n_switches)
+        duration_length = np.random.randint(low=20, high=25, size=n_switches)
         if duration_length.sum() < T_save:
             duration_length[-1] = T_save - duration_length[:-1].sum()
         charges = np.repeat(charges, duration_length, axis=0)
