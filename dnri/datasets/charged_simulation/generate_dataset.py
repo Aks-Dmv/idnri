@@ -10,11 +10,11 @@ from torch.autograd import Variable
 parser = argparse.ArgumentParser()
 parser.add_argument('--simulation', type=str, default='charged',
                     help='What simulation to generate.')
-parser.add_argument('--num-train', type=int, default=1000,
+parser.add_argument('--num-train', type=int, default=300,
                     help='Number of training simulations to generate.')
-parser.add_argument('--num-valid', type=int, default=1000,
+parser.add_argument('--num-valid', type=int, default=300,
                     help='Number of validation simulations to generate.')
-parser.add_argument('--num-test', type=int, default=1000,
+parser.add_argument('--num-test', type=int, default=300,
                     help='Number of test simulations to generate.')
 parser.add_argument('--length', type=int, default=5100,
                     help='Length of trajectory.')
