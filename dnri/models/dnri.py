@@ -30,7 +30,7 @@ class DNRI(nn.Module):
         self.normalize_kl_per_var = params.get('normalize_kl_per_var', False)
         self.normalize_nll = params.get('normalize_nll', False)
         self.normalize_nll_per_var = params.get('normalize_nll_per_var', False)
-        self.kl_coef = params.get('kl_coef', 1.)
+        self.kl_coef = params.get('kl_coef', 10.)
         self.nll_loss_type = params.get('nll_loss_type', 'crossent')
         self.prior_variance = params.get('prior_variance')
         self.timesteps = params.get('timesteps', 0)
@@ -175,8 +175,8 @@ class DNRI(nn.Module):
             loss_kl = 0.5*loss_kl + 0.5*self.kl_categorical_avg(prob)
         
         # intervention cap bounds the contrastive loss
-        intervention_cap = 10.
-        loss = loss_nll + self.kl_coef*loss_kl - torch.min(intervention_loss_nll, torch.ones(intervention_loss_nll.shape).cuda()*intervention_cap)
+        intervention_cap = 1.
+        loss = loss_nll + self.kl_coef*loss_kl + torch.max(intervention_cap - intervention_loss_nll, torch.zeros(intervention_loss_nll.shape).cuda())
         
         if disc is not None:
             loss = loss.mean() - self.kl_coef*disc_entropy.mean()
