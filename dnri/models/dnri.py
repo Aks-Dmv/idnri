@@ -60,6 +60,30 @@ class DNRI(nn.Module):
                 if params['gpu']:
                     log_prior = log_prior.cuda(non_blocking=True)
                 self.log_prior = log_prior
+                
+                
+            # this should be a new param called 'no_term_prior', and is a quick fix for now
+            if params.get('no_edge_prior') is not None:
+                prior = np.zeros(2)
+                prior.fill(0.2)#1 - params['no_term_prior']))
+                prior[0] = 0.8#params['no_term_prior']
+                log_prior = torch.FloatTensor(np.log(prior))
+                log_prior = torch.unsqueeze(log_prior, 0)
+                log_prior = torch.unsqueeze(log_prior, 0)
+                if params['gpu']:
+                    log_prior = log_prior.cuda(non_blocking=True)
+                self.log_term_prior = log_prior
+                print("USING NO EDGE PRIOR: ",self.log_prior)
+            else:
+                print("USING UNIFORM PRIOR")
+                prior = np.zeros(2)
+                prior.fill(0.5)
+                log_prior = torch.FloatTensor(np.log(prior))
+                log_prior = torch.unsqueeze(log_prior, 0)
+                log_prior = torch.unsqueeze(log_prior, 0)
+                if params['gpu']:
+                    log_prior = log_prior.cuda(non_blocking=True)
+                self.log_term_prior = log_prior
 
     def single_step_forward(self, inputs, decoder_hidden, edge_logits, hard_sample):
         old_shape = edge_logits.shape
@@ -101,7 +125,7 @@ class DNRI(nn.Module):
         interv_decoder_hidden = self.decoder.get_initial_hidden(inputs)
         
         hard_sample = (not is_train) or self.train_hard_sample
-        prior_logits, posterior_logits, _ = self.encoder(inputs[:, :-1])
+        prior_logits, posterior_logits, _, prior_term, posterior_term = self.encoder(inputs[:, :-1])
         if not is_train:
             teacher_forcing_steps = self.val_teacher_forcing_steps
         else:
@@ -171,12 +195,14 @@ class DNRI(nn.Module):
         
         prob = F.softmax(posterior_logits, dim=-1)
         loss_kl = self.kl_categorical_learned(prob, prior_logits)
+        prob_term = F.softmax(posterior_term, dim=-1)
+        loss_kl_term = self.kl_categorical_learned(prob_term, prior_term)
         if self.add_uniform_prior:
-            loss_kl = 0.5*loss_kl + 0.5*self.kl_categorical_avg(prob)
+            loss_kl = 0.33*loss_kl + 0.33*self.kl_categorical_avg(prob) + 0.33*self.kl_categorical_avg_term(prob_term)
         
         # intervention cap bounds the contrastive loss
         intervention_cap = 1.
-        loss = loss_nll + self.kl_coef*loss_kl + torch.max(intervention_cap - intervention_loss_nll, torch.zeros(intervention_loss_nll.shape).cuda())
+        loss = loss_nll + self.kl_coef*(loss_kl + loss_kl_term) + torch.max(intervention_cap - intervention_loss_nll, torch.zeros(intervention_loss_nll.shape).cuda())
         
         if disc is not None:
             loss = loss.mean() - self.kl_coef*disc_entropy.mean()
@@ -195,7 +221,7 @@ class DNRI(nn.Module):
         decoder_hidden = self.decoder.get_initial_hidden(inputs)
         all_predictions = []
         all_edges = []
-        prior_logits, _, prior_hidden = self.encoder(inputs[:, :-1])
+        prior_logits, _, prior_hidden, _, _ = self.encoder(inputs[:, :-1])
         for step in range(burn_in_timesteps-1):
             current_inputs = inputs[:, step]
             current_edge_logits = prior_logits[:, step]
@@ -205,7 +231,7 @@ class DNRI(nn.Module):
                 all_predictions.append(predictions)
         predictions = inputs[:, burn_in_timesteps-1]
         for step in range(prediction_steps):
-            current_edge_logits, prior_hidden = self.encoder.single_step_forward(predictions, prior_hidden)
+            current_edge_logits, prior_hidden = self.encoder.single_step_forward(predictions, prior_hidden, current_edge_logits)
             predictions, decoder_hidden, edges = self.single_step_forward(predictions, decoder_hidden, current_edge_logits, True)
             all_predictions.append(predictions)
             all_edges.append(edges)
@@ -234,7 +260,7 @@ class DNRI(nn.Module):
 
     def predict_future_fixedwindow(self, inputs, burn_in_steps, prediction_steps, batch_size, return_edges=False):
         print("INPUT SHAPE: ",inputs.shape)
-        prior_logits, _, prior_hidden = self.encoder(inputs[:, :-1])
+        prior_logits, _, prior_hidden,_,_ = self.encoder(inputs[:, :-1])
         decoder_hidden = self.decoder.get_initial_hidden(inputs)
         for step in range(burn_in_steps-1):
             current_inputs = inputs[:, step]
@@ -251,7 +277,7 @@ class DNRI(nn.Module):
                 if window_ind + step >= inputs.size(1):
                     break
                 predictions = inputs[:, window_ind + step] 
-                current_edge_logits, prior_hidden = self.encoder.single_step_forward(predictions, prior_hidden)
+                current_edge_logits, prior_hidden = self.encoder.single_step_forward(predictions, prior_hidden, current_edge_logits)
                 predictions, decoder_hidden, _ = self.single_step_forward(predictions, decoder_hidden, current_edge_logits, True)
                 current_batch_preds.append(predictions)
                 tmp_prior = self.encoder.copy_states(prior_hidden)
@@ -268,7 +294,7 @@ class DNRI(nn.Module):
                 current_batch_edges = torch.cat(current_batch_edges, 0)
                 current_timestep_edges = [current_batch_edges]
             for step in range(prediction_steps - 1):
-                current_batch_edge_logits, batch_prior_hidden = self.encoder.single_step_forward(current_batch_preds, batch_prior_hidden)
+                current_batch_edge_logits, batch_prior_hidden = self.encoder.single_step_forward(current_batch_preds, batch_prior_hidden, current_batch_edge_logits)
                 current_batch_preds, batch_decoder_hidden, _ = self.single_step_forward(current_batch_preds, batch_decoder_hidden, current_batch_edge_logits, True)
                 current_timestep_preds.append(current_batch_preds)
                 if return_edges:
@@ -336,6 +362,16 @@ class DNRI(nn.Module):
             return kl_div.view(preds.size(0), -1).sum(dim=1)
 
 
+    def kl_categorical_avg_term(self, preds, eps=1e-16):
+        avg_preds = preds.mean(dim=2)
+        kl_div = avg_preds*(torch.log(avg_preds+eps) - self.log_term_prior)
+        if self.normalize_kl:
+            return kl_div.sum(-1).view(preds.size(0), -1).mean(dim=1)
+        elif self.normalize_kl_per_var:
+            return kl_div.sum() / (self.num_vars * preds.size(0))
+        else:
+            return kl_div.view(preds.size(0), -1).sum(dim=1)
+    
     def save(self, path):
         torch.save(self.state_dict(), path)
 
@@ -401,6 +437,32 @@ class DNRI_Encoder(nn.Module):
             self.prior_fc_out = nn.Sequential(*layers)
 
 
+        # adding the termination model here
+        num_layers = params['encoder_mlp_num_layers']
+        if num_layers == 1:
+            self.term_encoder_fc_out = nn.Linear(out_hidden_size, 1)
+        else:
+            tmp_hidden_size = params['encoder_mlp_hidden']
+            layers = [nn.Linear(out_hidden_size, tmp_hidden_size), nn.ELU(inplace=True)]
+            for _ in range(num_layers - 2):
+                layers.append(nn.Linear(tmp_hidden_size, tmp_hidden_size))
+                layers.append(nn.ELU(inplace=True))
+            layers.append(nn.Linear(tmp_hidden_size, 1))
+            self.term_encoder_fc_out = nn.Sequential(*layers)
+
+        num_layers = params['prior_num_layers']
+        if num_layers == 1:
+            self.term_prior_fc_out = nn.Linear(rnn_hidden_size, 1)
+        else:
+            tmp_hidden_size = params['prior_hidden_size']
+            layers = [nn.Linear(rnn_hidden_size, tmp_hidden_size), nn.ELU(inplace=True)]
+            for _ in range(num_layers - 2):
+                layers.append(nn.Linear(tmp_hidden_size, tmp_hidden_size))
+                layers.append(nn.ELU(inplace=True))
+            layers.append(nn.Linear(tmp_hidden_size, 1))
+            self.term_prior_fc_out = nn.Sequential(*layers)
+        
+        
         self.num_vars = num_vars
         edges = np.ones(num_vars) - np.eye(num_vars)
         self.send_edges = np.where(edges)[0]
@@ -483,7 +545,31 @@ class DNRI_Encoder(nn.Module):
             prior_result = self.prior_fc_out(forward_x).view(old_shape[0], old_shape[1], timesteps, self.num_edges).transpose(1,2).contiguous()
             combined_x = torch.cat([forward_x, reverse_x], dim=-1)
             encoder_result = self.encoder_fc_out(combined_x).view(old_shape[0], old_shape[1], timesteps, self.num_edges).transpose(1,2).contiguous()
-            return prior_result, encoder_result, prior_state
+            
+            # adding term models here
+            term_prior_result = self.term_prior_fc_out(forward_x).view(old_shape[0], old_shape[1], timesteps, 1).transpose(1,2).contiguous()
+            term_encoder_result = self.term_encoder_fc_out(combined_x).view(old_shape[0], old_shape[1], timesteps, 1).transpose(1,2).contiguous()
+            
+            term_prior_prob = F.sigmoid(term_prior_result)
+            term_encoder_prob = F.sigmoid(term_encoder_result)
+            
+            prior_result[:,1:] = prior_result[:,1:]*term_vals[:,1:] + prior_result[:,:-1]*(1.0 - term_vals[:,1:])
+            encoder_result[:,1:] = encoder_result[:,1:]*term_enc_vals[:,1:] + encoder_result[:,:-1]*(1.0 - term_enc_vals[:,1:])
+            
+            # z_prev_prior = torch.clone(prior_result)
+            # z_prev_encoder = torch.clone(encoder_result)
+            
+            # for i in range(1, timesteps):
+            #     term_vals = term_prior_prob[:,i]
+            #     prior_result[:,i] = prior_result[:,i]*term_vals + prior_result[:,i-1]*(1.0 - term_vals)
+            # 
+            #     term_enc_vals = term_encoder_prob[:,i]
+            #     encoder_result[:,i] = encoder_result[:,i]*term_enc_vals + encoder_result[:,i-1]*(1.0 - term_enc_vals)
+            # 
+            # prior_result = prior_result*term_prior_result + z_prev_prior*(1.0-term_prior_result)
+            # encoder_result = encoder_result*term_encoder_result + z_prev_encoder*(1.0 - term_encoder_result)
+
+            return prior_result, encoder_result, prior_state, term_prior_result, term_encoder_result
         else:
             # Inputs is shape [batch, num_timesteps, num_vars, input_size]
             num_timesteps = inputs.size(1)
@@ -527,7 +613,7 @@ class DNRI_Encoder(nn.Module):
             encoder_result = torch.cat(all_encoder_result, dim=1).cuda(non_blocking=True)
             return prior_result, encoder_result, prior_state
 
-    def single_step_forward(self, inputs, prior_state):
+    def single_step_forward(self, inputs, prior_state, z_prev_prior):
         # Inputs is shape [batch, num_vars, input_size]
         x = self.mlp1(inputs)  # 2-layer ELU net per node
         x = self.node2edge(x)
@@ -548,6 +634,12 @@ class DNRI_Encoder(nn.Module):
         x, prior_state = self.forward_rnn(x, prior_state)
         prior_result = self.prior_fc_out(x).view(old_shape[0], old_shape[1], self.num_edges)
         prior_state = (prior_state[0].view(old_prior_shape), prior_state[1].view(old_prior_shape))
+        
+        # adding the term model here
+        term_prior_result = self.term_prior_fc_out(x).view(old_shape[0], old_shape[1], 1)
+        term_prior_prob = F.sigmoid(term_prior_result)
+        prior_result = prior_result*term_prior_prob + z_prev_prior*(1.0-term_prior_prob)
+        
         return prior_result, prior_state
 
     
