@@ -1,11 +1,11 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import time
-
+import matplotlib.animation as animation
 
 class ChargedParticlesSim(object):
-    def __init__(self, n_balls=5, box_size=5., loc_std=1., vel_norm=0.5,
-                 interaction_strength=1., noise_var=0.):
+    def __init__(self, n_balls=3, box_size=2., loc_std=0.5, vel_norm=0.5,
+                 interaction_strength=0.4, noise_var=0.):
         self.n_balls = n_balls
         self.box_size = box_size
         self.loc_std = loc_std
@@ -80,20 +80,7 @@ class ChargedParticlesSim(object):
         np.fill_diagonal(diag_mask, 0)
         counter = 0
         # Sample edges
-        n_switches = np.random.randint(low=1, high=2)
-        charges = np.random.choice(self._charge_types, size=(n_switches, self.n_balls),
-                                   p=charge_prob)
-        
-        duration_length = np.random.randint(low=20, high=25, size=n_switches)
-        if duration_length.sum() < T_save:
-            duration_length[-1] = T_save - duration_length[:-1].sum()
-        charges = np.repeat(charges, duration_length, axis=0)
-        # make charges the same length as loc and vel
-        charges = charges[:T_save]
-        # print(charges)
         edges = np.zeros((T_save, self.n_balls, self.n_balls))
-        for i in range(T_save):
-            edges[i] = charges[i].reshape((-1, 1)).dot(charges[i].reshape((-1, 1)).transpose())
         # Initialize location and velocity
         loc = np.zeros((T_save, 2, n))
         vel = np.zeros((T_save, 2, n))
@@ -111,7 +98,9 @@ class ChargedParticlesSim(object):
                 self._l2(loc_next.transpose(), loc_next.transpose()), 3. / 2.)
             # size of forces up to a 1/|r| factor
             # since I later multiply by an unnormalized r vector
-            forces_size = self.interaction_strength * edges[counter] / l2_dist_power3
+            edges[counter] = (2.*(l2_dist_power3 >1.0)-1.)
+            push_pull = -1.*(6.*(edges[counter] >0.)-1.)
+            forces_size = self.interaction_strength * push_pull / l2_dist_power3
             np.fill_diagonal(forces_size,
                              0)  # self forces are zero (fixes division by zero)
             assert (np.abs(forces_size[diag_mask]).min() > 1e-10)
@@ -132,16 +121,20 @@ class ChargedParticlesSim(object):
                 loc_next, vel_next = self._clamp(loc_next, vel_next)
 
                 if i % sample_freq == 0:
+                    
                     loc[counter, :, :], vel[counter, :, :] = loc_next, vel_next
                     counter += 1
                     if counter == T_save:
                         break
+                    edges[counter] = (2.*(l2_dist_power3 >1.0)-1.)
 
                 l2_dist_power3 = np.power(
                     self._l2(loc_next.transpose(), loc_next.transpose()),
                     3. / 2.)
                 
-                forces_size = self.interaction_strength * edges[counter] / l2_dist_power3
+                push_pull = -1.*(6.*(edges[counter] >0.)-1.)
+                forces_size = self.interaction_strength * push_pull / l2_dist_power3
+                # print(forces_size, edges[counter], l2_dist_power3)
                 np.fill_diagonal(forces_size, 0)
                 # assert (np.abs(forces_size[diag_mask]).min() > 1e-10)
 
@@ -165,21 +158,32 @@ class ChargedParticlesSim(object):
 if __name__ == '__main__':
     sim = ChargedParticlesSim()
 
-    t = time.time()
-    loc, vel, edges = sim.sample_trajectory(T=2550, sample_freq=50)
-    # print(edges)
+    for i in range(5):
+            
+        t = time.time()
+        loc, vel, edges = sim.sample_trajectory(T=5100, sample_freq=100)
+        # print(edges)
 
-    print("Simulation time: {}".format(time.time() - t))
-    vel_norm = np.sqrt((vel ** 2).sum(axis=1))
-    plt.figure()
-    axes = plt.gca()
-    axes.set_xlim([-5., 5.])
-    axes.set_ylim([-5., 5.])
-    for i in range(loc.shape[-1]):
-        plt.plot(loc[:, 0, i], loc[:, 1, i])
-        plt.plot(loc[0, 0, i], loc[0, 1, i], 'd')
-    plt.figure()
-    energies = [sim._energy(loc[i, :, :], vel[i, :, :], edges[i]) for i in
-                range(loc.shape[0])]
-    plt.plot(energies)
-    plt.show()
+        print("Simulation time: {}".format(time.time() - t))
+        vel_norm = np.sqrt((vel ** 2).sum(axis=1))
+
+        # for i in range(loc.shape[-1]):
+        #     plt.plot(loc[:, 0, i], loc[:, 1, i])
+        #     plt.plot(loc[0, 0, i], loc[0, 1, i], 'd')
+        Writer = animation.writers['ffmpeg']
+        writer = Writer(fps=15, metadata=dict(artist='Me'), bitrate=1800)
+        fig, ax = plt.subplots()
+        def update(frame):
+            ax.clear()
+            ax.plot(loc[frame, 0, 0], loc[frame, 1, 0], 'bo')
+            ax.plot(loc[frame, 0, 1], loc[frame, 1, 1], 'ro')
+            ax.plot(loc[frame, 0, 2], loc[frame, 1, 2], 'go')
+            ax.set_xlim(-2, 2)
+            ax.set_ylim(-2, 2)
+        ani = animation.FuncAnimation(fig, update, interval=100, frames=50)
+        ani.save("movie"+str(i)+".mp4", writer=writer)#, codec='mpeg4')
+        # # plt.figure()
+        # # energies = [sim._energy(loc[i, :, :], vel[i, :, :], edges[i]) for i in
+        # #             range(loc.shape[0])]
+        # # # plt.plot(energies)
+        # plt.show()
