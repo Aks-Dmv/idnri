@@ -65,8 +65,8 @@ class DNRI(nn.Module):
             # this should be a new param called 'no_term_prior', and is a quick fix for now
             if params.get('no_edge_prior') is not None:
                 prior = np.zeros(2)
-                prior.fill(0.2)#1 - params['no_term_prior']))
-                prior[0] = 0.8#params['no_term_prior']
+                prior.fill(0.7)#1 - params['no_term_prior']))
+                prior[0] = 0.3#params['no_term_prior']
                 log_prior = torch.FloatTensor(np.log(prior))
                 log_prior = torch.unsqueeze(log_prior, 0)
                 log_prior = torch.unsqueeze(log_prior, 0)
@@ -182,9 +182,9 @@ class DNRI(nn.Module):
         target = inputs[:, 1:, :, :]
         loss_nll = self.nll(all_predictions, target)
         
-        #gamma = self.kl_coef*0.5
-        for i in reversed(range(1,len(loss_nll[1])-1)):
-            loss_nll[:,i] = loss_nll[:,i]*(1. + i/10.)
+        gamma = 0.99
+        for i in reversed(range(len(loss_nll[1])-1)):
+            loss_nll[:,i] += loss_nll[:,i+1] * gamma
 
         loss_nll = loss_nll.mean(dim=-1)
         all_interventions = all_interventions.mean(dim=-1)
