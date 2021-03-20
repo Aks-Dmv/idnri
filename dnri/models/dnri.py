@@ -553,18 +553,19 @@ class DNRI_Encoder(nn.Module):
             term_prior_prob = torch.sigmoid(term_prior_result)
             term_encoder_prob = torch.sigmoid(term_encoder_result)
             
-            prior_result[:,1:] = prior_result[:,1:]*term_prior_prob[:,1:] + prior_result[:,:-1]*(1.0 - term_prior_prob[:,1:])
-            encoder_result[:,1:] = encoder_result[:,1:]*term_encoder_prob[:,1:] + encoder_result[:,:-1]*(1.0 - term_encoder_prob[:,1:])
+            # these two lines are the wrong implementation. We need a rolling carry for the termination (which the for loop achieves)
+            # prior_result[:,1:] = prior_result[:,1:]*term_prior_prob[:,1:] + prior_result[:,:-1]*(1.0 - term_prior_prob[:,1:])
+            # encoder_result[:,1:] = encoder_result[:,1:]*term_encoder_prob[:,1:] + encoder_result[:,:-1]*(1.0 - term_encoder_prob[:,1:])
             
             # z_prev_prior = torch.clone(prior_result)
             # z_prev_encoder = torch.clone(encoder_result)
             
-            # for i in range(1, timesteps):
-            #     term_vals = term_prior_prob[:,i]
-            #     prior_result[:,i] = prior_result[:,i]*term_vals + prior_result[:,i-1]*(1.0 - term_vals)
-            # 
-            #     term_enc_vals = term_encoder_prob[:,i]
-            #     encoder_result[:,i] = encoder_result[:,i]*term_enc_vals + encoder_result[:,i-1]*(1.0 - term_enc_vals)
+            for i in range(1, timesteps):
+                term_vals = term_prior_prob[:,i]
+                prior_result[:,i] = prior_result[:,i]*term_vals + prior_result[:,i-1]*(1.0 - term_vals)
+                
+                term_enc_vals = term_encoder_prob[:,i]
+                encoder_result[:,i] = encoder_result[:,i]*term_enc_vals + encoder_result[:,i-1]*(1.0 - term_enc_vals)
             # 
             # prior_result = prior_result*term_prior_result + z_prev_prior*(1.0-term_prior_result)
             # encoder_result = encoder_result*term_encoder_result + z_prev_encoder*(1.0 - term_encoder_result)
