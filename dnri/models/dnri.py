@@ -550,11 +550,11 @@ class DNRI_Encoder(nn.Module):
             term_prior_result = self.term_prior_fc_out(forward_x).view(old_shape[0], old_shape[1], timesteps, 1).transpose(1,2).contiguous()
             term_encoder_result = self.term_encoder_fc_out(combined_x).view(old_shape[0], old_shape[1], timesteps, 1).transpose(1,2).contiguous()
             
-            term_prior_prob = F.sigmoid(term_prior_result)
-            term_encoder_prob = F.sigmoid(term_encoder_result)
+            term_prior_prob = torch.sigmoid(term_prior_result)
+            term_encoder_prob = torch.sigmoid(term_encoder_result)
             
-            prior_result[:,1:] = prior_result[:,1:]*term_vals[:,1:] + prior_result[:,:-1]*(1.0 - term_vals[:,1:])
-            encoder_result[:,1:] = encoder_result[:,1:]*term_enc_vals[:,1:] + encoder_result[:,:-1]*(1.0 - term_enc_vals[:,1:])
+            prior_result[:,1:] = prior_result[:,1:]*term_prior_prob[:,1:] + prior_result[:,:-1]*(1.0 - term_prior_prob[:,1:])
+            encoder_result[:,1:] = encoder_result[:,1:]*term_encoder_prob[:,1:] + encoder_result[:,:-1]*(1.0 - term_encoder_prob[:,1:])
             
             # z_prev_prior = torch.clone(prior_result)
             # z_prev_encoder = torch.clone(encoder_result)
@@ -637,7 +637,7 @@ class DNRI_Encoder(nn.Module):
         
         # adding the term model here
         term_prior_result = self.term_prior_fc_out(x).view(old_shape[0], old_shape[1], 1)
-        term_prior_prob = F.sigmoid(term_prior_result)
+        term_prior_prob = torch.sigmoid(term_prior_result)
         prior_result = prior_result*term_prior_prob + z_prev_prior*(1.0-term_prior_prob)
         
         return prior_result, prior_state
