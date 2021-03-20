@@ -557,15 +557,15 @@ class DNRI_Encoder(nn.Module):
             # prior_result[:,1:] = prior_result[:,1:]*term_prior_prob[:,1:] + prior_result[:,:-1]*(1.0 - term_prior_prob[:,1:])
             # encoder_result[:,1:] = encoder_result[:,1:]*term_encoder_prob[:,1:] + encoder_result[:,:-1]*(1.0 - term_encoder_prob[:,1:])
             
-            # z_prev_prior = torch.clone(prior_result)
-            # z_prev_encoder = torch.clone(encoder_result)
+            z_prev_prior = torch.clone(prior_result)
+            z_prev_encoder = torch.clone(encoder_result)
             
             for i in range(1, timesteps):
                 term_vals = term_prior_prob[:,i]
-                prior_result[:,i] = prior_result[:,i]*term_vals + prior_result[:,i-1]*(1.0 - term_vals)
+                prior_result[:,i] = z_prev_prior[:,i]*term_vals + z_prev_prior[:,i-1]*(1.0 - term_vals)
                 
                 term_enc_vals = term_encoder_prob[:,i]
-                encoder_result[:,i] = encoder_result[:,i]*term_enc_vals + encoder_result[:,i-1]*(1.0 - term_enc_vals)
+                encoder_result[:,i] = z_prev_encoder[:,i]*term_enc_vals + z_prev_encoder[:,i-1]*(1.0 - term_enc_vals)
             # 
             # prior_result = prior_result*term_prior_result + z_prev_prior*(1.0-term_prior_result)
             # encoder_result = encoder_result*term_encoder_result + z_prev_encoder*(1.0 - term_encoder_result)
