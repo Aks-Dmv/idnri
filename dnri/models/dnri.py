@@ -182,9 +182,9 @@ class DNRI(nn.Module):
         target = inputs[:, 1:, :, :]
         loss_nll = self.nll(all_predictions, target)
         
-        gamma = 0.99
+        #gamma = 0.99
         for i in reversed(range(len(loss_nll[1])-1)):
-            loss_nll[:,i] += loss_nll[:,i+1] * gamma
+            loss_nll[:,i] = loss_nll[:,i+1] * (1 + (5 - i/10.))
 
         loss_nll = loss_nll.mean(dim=-1)
         all_interventions = all_interventions.mean(dim=-1)
