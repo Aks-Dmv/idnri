@@ -113,7 +113,7 @@ class DNRI(nn.Module):
         
         return kld_loss
 
-    def calculate_loss(self, inputs, is_train=False, epsilon_curr=1.0, teacher_forcing=True, return_edges=False, return_logits=False, use_prior_logits=False, disc=None):
+    def calculate_loss(self, inputs, is_train=False, teacher_forcing=True, return_edges=False, return_logits=False, use_prior_logits=False, disc=None):
         decoder_hidden = self.decoder.get_initial_hidden(inputs)
         num_time_steps = inputs.size(1)
         all_edges = []
@@ -131,7 +131,7 @@ class DNRI(nn.Module):
         else:
             teacher_forcing_steps = self.teacher_forcing_steps
         for step in range(num_time_steps-1):
-            if (teacher_forcing and (np.random.random_sample() > epsilon_curr)) or step == 0:
+            if (teacher_forcing and (teacher_forcing_steps == -1 or step < teacher_forcing_steps)) or step == 0:
                 current_inputs = inputs[:, step]
             else:
                 current_inputs = predictions
