@@ -82,7 +82,7 @@ def train(model, train_data, val_data, params, train_writer, val_writer):
             if gpu:
                 inputs = inputs.cuda(non_blocking=True)
                 
-            loss, loss_nll, loss_kl, logits, all_Preds = model.calculate_loss(inputs, is_train=True, epsilon_curr = epoch/num_epochs, return_logits=True, disc=disc)
+            loss, loss_nll, loss_kl, logits, all_Preds = model.calculate_loss(inputs, is_train=True, return_logits=True, disc=disc)
             x1_x2_pairs = torch.cat([all_Preds[:, :-1, :, :], all_Preds[:, 1:, :, :]], dim=-1).detach().clone().cuda()
             discrim_pred = disc(x1_x2_pairs)
             discrim_prob = nn.functional.softmax(discrim_pred, dim=-1)
