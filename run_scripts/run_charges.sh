@@ -1,4 +1,4 @@
-GPU=4 # Set to whatever GPU you want to use
+GPU=5 # Set to whatever GPU you want to use
 
 # First: process data
 
@@ -26,10 +26,10 @@ do
     do
     echo "We are doing SEED ${SEED}, kl_coef ${klCoef}"
     WORKING_DIR="${BASE_RESULTS_DIR}dnri/seed_${SEED}/"
-    ENCODER_ARGS="--encoder_hidden 128 --encoder_mlp_num_layers 3 --encoder_mlp_hidden 64 --encoder_rnn_hidden 32"
-    DECODER_ARGS="--decoder_hidden 128 --decoder_type ref_mlp"
-    HIDDEN_ARGS="--rnn_hidden 32"
-    PRIOR_ARGS="--use_learned_prior --prior_num_layers 3 --prior_hidden_size 64"
+    ENCODER_ARGS="--encoder_hidden 64 --encoder_mlp_num_layers 3 --encoder_mlp_hidden 32 --encoder_rnn_hidden 16"
+    DECODER_ARGS="--decoder_hidden 64 --decoder_type ref_mlp"
+    HIDDEN_ARGS="--rnn_hidden 16"
+    PRIOR_ARGS="--use_learned_prior --prior_num_layers 3 --prior_hidden_size 32"
     MODEL_ARGS="--model_type dnri --graph_type dynamic --skip_first --num_edge_types 3 $ENCODER_ARGS $DECODER_ARGS $HIDDEN_ARGS $PRIOR_ARGS --seed ${SEED}"
     TRAINING_ARGS="--add_uniform_prior --no_edge_prior 0.05 --batch_size 16 --lr 5e-4 --use_adam --num_epochs 200 --lr_decay_factor 0.5 --lr_decay_steps 200 --normalize_kl --normalize_nll --tune_on_nll --val_teacher_forcing --teacher_forcing_steps -1 --kl_coef ${klCoef}"
     mkdir -p $WORKING_DIR
