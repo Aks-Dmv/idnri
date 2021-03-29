@@ -94,6 +94,15 @@ class DNRI(nn.Module):
         predictions, decoder_hidden = self.decoder(inputs, decoder_hidden, edges)
         return predictions, decoder_hidden, edges
     
+    def single_step_critic_val(self, inputs, decoder_hidden, edge_logits, hard_sample):
+        old_shape = edge_logits.shape
+        edges = model_utils.gumbel_softmax(
+            edge_logits.reshape(-1, self.num_edge_types), 
+            tau=self.gumbel_temp, 
+            hard=hard_sample).view(old_shape)
+        critic_vals = self.decoder.return_critic(inputs, decoder_hidden, edges)
+        return critic_vals
+    
     def calc_contrastive_loss(self, inputs1, decoder_hidden1, edge_logits1, hard_sample1, inputs2, decoder_hidden2, edge_logits2, hard_sample2):
         old_shape1 = edge_logits1.shape
         edges1 = model_utils.gumbel_softmax(
@@ -140,6 +149,7 @@ class DNRI(nn.Module):
             else:
                 current_p_logits = prior_logits[:, step]
             predictions, decoder_hidden, edges = self.single_step_forward(current_inputs, decoder_hidden, current_p_logits, hard_sample)
+            critic_vals = self.single_step_critic_val(current_inputs, decoder_hidden, current_p_logits, hard_sample)
             
             # conducting an intervention
             intervened_indices = torch.randint(current_p_logits.shape[1], (current_p_logits.shape[0],)).cuda()
@@ -782,6 +792,8 @@ class DNRI_MLP_Decoder(nn.Module):
         self.out_fc2 = nn.Linear(n_hid, n_hid)
         self.mu_layer = nn.Linear(n_hid, out_size)
         self.log_std_layer = nn.Linear(n_hid, out_size)
+        
+        self.critic_layer = nn.Linear(n_hid, 1)
 
         print('Using learned interaction net decoder.')
 
@@ -794,6 +806,60 @@ class DNRI_MLP_Decoder(nn.Module):
 
     def get_initial_hidden(self, inputs):
         return None
+    
+    def return_critic(self, inputs, hidden, edges):
+
+        # single_timestep_inputs has shape
+        # [batch_size, num_atoms, num_dims]
+
+        # single_timestep_rel_type has shape:
+        # [batch_size, num_atoms*(num_atoms-1), num_edge_types]
+        # Node2edge
+        receivers = inputs[:, self.recv_edges, :]
+        senders = inputs[:, self.send_edges, :]
+        pre_msg = torch.cat([receivers, senders], dim=-1)
+
+        if inputs.is_cuda:
+            all_msgs = torch.cuda.FloatTensor(pre_msg.size(0), pre_msg.size(1),
+                                self.msg_out_shape).fill_(0.)
+        else:
+            all_msgs = torch.zeros(pre_msg.size(0), pre_msg.size(1),
+                                self.msg_out_shape)
+
+        if self.skip_first_edge_type:
+            start_idx = 1
+        else:
+            start_idx = 0
+        if self.training:
+            p = self.dropout_prob
+            std_gating = 1.
+        else:
+            p = 0
+            std_gating = 0.
+
+        # Run separate MLP for every edge type
+        # NOTE: To exlude one edge type, simply offset range by 1
+        for i in range(start_idx, len(self.msg_fc2)):
+            msg = F.relu(self.msg_fc1[i](pre_msg))
+            msg = F.dropout(msg, p=p)
+            msg = F.relu(self.msg_fc2[i](msg))
+            msg = msg * edges[:, :, i:i + 1]
+            all_msgs += msg
+
+        # Aggregate all msgs to receiver
+        agg_msgs = all_msgs.transpose(-2, -1).matmul(self.edge2node_mat).transpose(-2, -1)
+        agg_msgs = agg_msgs.contiguous()
+
+        # Skip connection
+        aug_inputs = torch.cat([inputs, agg_msgs], dim=-1)
+
+        # Output MLP
+        pred = F.dropout(F.relu(self.out_fc1(aug_inputs)), p=p)
+        pred = F.dropout(F.relu(self.out_fc2(pred)), p=p)
+        
+        critic_val = self.critic_layer(pred)
+
+        return critic_val
     
     def return_mu_sigma(self, inputs, hidden, edges):
 
@@ -847,7 +913,7 @@ class DNRI_MLP_Decoder(nn.Module):
         
         mu = self.mu_layer(pred)
         log_std = self.log_std_layer(pred)
-        log_std = torch.clamp(log_std, -10, 1)
+        log_std = torch.clamp(log_std, -3, 1)
         std = torch.exp(log_std)
 
         return mu, std
@@ -904,7 +970,7 @@ class DNRI_MLP_Decoder(nn.Module):
         
         mu = self.mu_layer(pred)
         log_std = self.log_std_layer(pred)
-        log_std = torch.clamp(log_std, -10, 1)
+        log_std = torch.clamp(log_std, -3, 1)
         std = torch.exp(log_std)
         
         pred = mu + std_gating * torch.normal(torch.zeros(mu.shape), torch.ones(std.shape)).cuda() * std
