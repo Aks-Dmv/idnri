@@ -213,11 +213,11 @@ class DNRI(nn.Module):
             loss = loss.mean()
 
         if return_edges:
-            return loss, loss_nll_reinf, loss_kl, edges
+            return loss, loss_nll, loss_kl, edges
         elif return_logits:
-            return loss, loss_nll_reinf, loss_kl, posterior_logits, all_predictions
+            return loss, loss_nll, loss_kl, posterior_logits, all_predictions
         else:
-            return loss, loss_nll_reinf, loss_kl
+            return loss, loss_nll, loss_kl
 
     def predict_future(self, inputs, prediction_steps, return_edges=False, return_everything=False):
         burn_in_timesteps = inputs.size(1)
