@@ -129,6 +129,8 @@ class DNRI(nn.Module):
         all_predictions = []
         all_priors = []
         
+        all_critic_vals = []
+        
         # intervention variables
         all_interventions = []
         interv_decoder_hidden = self.decoder.get_initial_hidden(inputs)
@@ -178,7 +180,9 @@ class DNRI(nn.Module):
             
             all_predictions.append(predictions)
             all_edges.append(edges)
+            all_critic_vals.append(critic_vals)
         all_predictions = torch.stack(all_predictions, dim=1)
+        all_critic_vals = torch.stack(all_critic_vals, dim=1)
         # interventions
         all_interventions = torch.stack(all_interventions, dim=-1)
         
@@ -192,9 +196,15 @@ class DNRI(nn.Module):
         target = inputs[:, 1:, :, :]
         loss_nll = self.nll(all_predictions, target)
         
+        target_values_critic = loss_nll.detach().clone()
+        
         gamma = 0.99
         for i in reversed(range(len(loss_nll[1])-1)):
-            loss_nll[:,i] += loss_nll[:,i+1]*gamma
+            loss_nll[:,i] += loss_nll[:,i+1]*gamma - all_critic_vals[:,i].mean(dim=-1)
+            target_values_critic[:,i] += target_values_critic[:,i+1]*gamma
+        
+        loss_nll = loss_nll.mean(dim=-1)
+        loss_critic = 0.5 * self.nll(all_critic_vals.clone().mean(dim=-1), target_values_critic).mean(dim=-1)
 
         reinforce_loss = loss_nll.detach().view(loss_nll.shape[0], loss_nll.shape[1], 1, 1) * torch.log(all_predictions.clone())
         loss_nll_reinf = reinforce_loss.mean(dim=[1,2,3])
@@ -215,7 +225,7 @@ class DNRI(nn.Module):
         
         # intervention cap bounds the contrastive loss
         intervention_cap = 1.
-        loss = loss_nll_reinf + self.kl_coef*(loss_kl + loss_kl_term) + torch.max(intervention_cap - intervention_loss_nll, torch.zeros(intervention_loss_nll.shape).cuda())
+        loss = loss_nll_reinf + loss_critic + self.kl_coef*(loss_kl + loss_kl_term) + torch.max(intervention_cap - intervention_loss_nll, torch.zeros(intervention_loss_nll.shape).cuda())
         
         if disc is not None:
             loss = loss.mean() - self.kl_coef*disc_entropy.mean()
@@ -337,7 +347,7 @@ class DNRI(nn.Module):
         if self.normalize_nll_per_var:
             return neg_log_p.sum() / (target.size(0) * target.size(2))
         elif self.normalize_nll:
-            return (neg_log_p.sum(-1) + const).mean(dim=-1)#.view(preds.size(0), -1).mean(dim=1)
+            return (neg_log_p.sum(-1) + const)#.mean(dim=-1)#.view(preds.size(0), -1).mean(dim=1)
         else:
             return neg_log_p.view(target.size(0), -1).sum() / (target.size(1))
 
