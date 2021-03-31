@@ -142,7 +142,7 @@ class DNRI(nn.Module):
         else:
             teacher_forcing_steps = self.teacher_forcing_steps
         for step in range(num_time_steps-1):
-            if (teacher_forcing and (teacher_forcing_steps == -1 or step < teacher_forcing_steps)) or step == 0:
+            if (teacher_forcing) or step == 0:
                 current_inputs = inputs[:, step]
             else:
                 current_inputs = predictions
