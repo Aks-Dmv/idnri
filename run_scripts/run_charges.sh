@@ -10,7 +10,7 @@ mkdir -p $DATA_PATH
 
 BASE_RESULTS_DIR="results/charges/"
 
-for klCoef in {10..11}
+for klCoef in {2..3}
 do
 
     #WORKING_DIR="${BASE_RESULTS_DIR}nri/seed_${SEED}/"
