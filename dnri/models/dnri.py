@@ -186,6 +186,8 @@ class DNRI(nn.Module):
         # interventions
         all_interventions = torch.stack(all_interventions, dim=-1)
         
+        final_critic_vals = self.single_step_critic_val(current_inputs, decoder_hidden, current_p_logits, hard_sample)
+        
         if disc is not None:
             x1_x2_pairs = torch.cat([all_predictions[:, :-1, :, :], all_predictions[:, 1:, :, :]], dim=-1)
             discrim_pred = disc(x1_x2_pairs)
@@ -199,9 +201,14 @@ class DNRI(nn.Module):
         target_values_critic = loss_nll.detach().clone()
         
         gamma = 0.99
-        for i in reversed(range(len(loss_nll[1])-1)):
-            loss_nll[:,i] += loss_nll[:,i+1]*gamma - all_critic_vals[:,i].mean(dim=-1)
-            target_values_critic[:,i] += target_values_critic[:,i+1]*gamma
+        for i in reversed(range(len(loss_nll[1]))):
+            if i == len(loss_nll[1]) - 1:
+                loss_nll[:,i] += final_critic_vals.mean(dim=-1)*gamma - all_critic_vals[:,i].mean(dim=-1)
+                target_values_critic[:,i] += final_critic_vals.mean(dim=-1)*gamma
+                
+            else:
+                loss_nll[:,i] += loss_nll[:,i+1]*gamma - all_critic_vals[:,i].mean(dim=-1)
+                target_values_critic[:,i] += target_values_critic[:,i+1]*gamma
         
         loss_nll = loss_nll.mean(dim=-1)
         loss_critic = 0.5 * self.nll(all_critic_vals.clone().mean(dim=-1), target_values_critic).mean(dim=-1)
