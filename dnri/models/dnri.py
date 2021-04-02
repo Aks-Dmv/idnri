@@ -213,8 +213,8 @@ class DNRI(nn.Module):
         loss_nll = loss_nll.mean(dim=-1)
         loss_critic = 0.5 * self.nll(all_critic_vals.clone().mean(dim=-1), target_values_critic).mean(dim=-1)
 
-        reinforce_loss = loss_nll.detach().view(loss_nll.shape[0], loss_nll.shape[1], 1, 1) * torch.log(all_predictions.clone())
-        loss_nll_reinf = reinforce_loss.mean(dim=[1,2,3])
+        #reinforce_loss = loss_nll.detach().view(loss_nll.shape[0], loss_nll.shape[1], 1, 1) * torch.log(all_predictions.clone())
+        #loss_nll_reinf = reinforce_loss.mean(dim=[1,2,3])
         
         loss_nll = loss_nll.mean(dim=-1)
         all_interventions = all_interventions.mean(dim=-1)
@@ -232,7 +232,7 @@ class DNRI(nn.Module):
         
         # intervention cap bounds the contrastive loss
         intervention_cap = 1.
-        loss = loss_nll_reinf + loss_critic + self.kl_coef*(loss_kl + loss_kl_term) + torch.max(intervention_cap - intervention_loss_nll, torch.zeros(intervention_loss_nll.shape).cuda())
+        loss = loss_nll + loss_critic + self.kl_coef*(loss_kl + loss_kl_term) + torch.max(intervention_cap - intervention_loss_nll, torch.zeros(intervention_loss_nll.shape).cuda())
         
         if disc is not None:
             loss = loss.mean() - self.kl_coef*disc_entropy.mean()
