@@ -213,9 +213,8 @@ class DNRI(nn.Module):
         loss_nll = loss_nll.mean(dim=-1)
         loss_critic = 0.5 * self.nll(all_critic_vals.clone().mean(dim=-1), target_values_critic).mean(dim=-1)
 
-        #reinforce_loss = loss_nll.detach().view(loss_nll.shape[0], loss_nll.shape[1], 1, 1) * torch.log(all_predictions.clone())
-        #loss_nll_reinf = reinforce_loss.mean(dim=[1,2,3])
-        loss_nll_reinf = -1.*all_critic_vals.clone().mean(dim=[1,2,3])
+        reinforce_loss = loss_nll.detach().view(loss_nll.shape[0], loss_nll.shape[1], 1, 1) * torch.log(all_predictions.clone())
+        loss_nll_reinf = reinforce_loss.mean(dim=[1,2,3])
         
         loss_nll = loss_nll.mean(dim=-1)
         all_interventions = all_interventions.mean(dim=-1)
@@ -811,7 +810,7 @@ class DNRI_MLP_Decoder(nn.Module):
         self.mu_layer = nn.Linear(n_hid, out_size)
         self.log_std_layer = nn.Linear(n_hid, out_size)
         
-        self.critic_layer = nn.Linear(n_hid + out_size, 1)
+        self.critic_layer = nn.Linear(n_hid, 1)
 
         print('Using learned interaction net decoder.')
 
@@ -875,14 +874,7 @@ class DNRI_MLP_Decoder(nn.Module):
         pred = F.dropout(F.relu(self.out_fc1(aug_inputs)), p=p)
         pred = F.dropout(F.relu(self.out_fc2(pred)), p=p)
         
-        mu = self.mu_layer(pred)
-        log_std = self.log_std_layer(pred)
-        log_std = torch.clamp(log_std, -3, 1)
-        std = torch.exp(log_std)
-        
-        pi_out = mu + std_gating * torch.normal(torch.zeros(mu.shape), torch.ones(std.shape)).cuda() * std
-        
-        critic_val = self.critic_layer(torch.cat([pred, inputs + pi_out], dim=-1))
+        critic_val = self.critic_layer(pred)
 
         return critic_val
     
